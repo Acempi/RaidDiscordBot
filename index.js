@@ -2,24 +2,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 
-// Werte aus Environment Variables laden (sicher für Render.com und andere Hostings)
+// Token aus Environment Variable laden (sicher für Hosting wie Render.com)
 const token = process.env.token;
-
 if (!token) {
     console.error('FEHLER: Bot-Token fehlt! Bitte in den Environment Variables "token" setzen.');
     process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-client.once(Events.ClientReady, readyClient => {
-    console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] // VoiceStates für Mute/Unmute nötig!
 });
-
-client.login(token);
 
 client.commands = new Collection();
 
+// Pfad zum commands-Ordner
 const foldersPath = path.join(__dirname, 'commands');
 const commandFolders = fs.readdirSync(foldersPath);
 
@@ -31,33 +27,43 @@ for (const folder of commandFolders) {
         const filePath = path.join(commandsPath, file);
         const command = require(filePath);
 
-        // Set a new item in the Collection with the key as the command name and the value as the exported module
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
+            console.log(`Command geladen: /${command.data.name} aus ${filePath}`);
         } else {
-            console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
+            console.log(`[WARNING] Command bei ${filePath} fehlt "data" oder "execute".`);
         }
     }
 }
 
+client.once(Events.ClientReady, readyClient => {
+    console.log(`Bot ist bereit! Eingeloggt als ${readyClient.user.tag}`);
+});
+
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    const command = interaction.client.commands.get(interaction.commandName);
+    const command = client.commands.get(interaction.commandName);
 
     if (!command) {
-        console.error(`No command matching ${interaction.commandName} was found.`);
+        console.error(`Kein Command gefunden: ${interaction.commandName}`);
         return;
     }
 
     try {
         await command.execute(interaction);
     } catch (error) {
-        console.error(error);
+        console.error('Fehler beim Ausführen eines Commands:', error);
+
+        const errorMessage = { content: 'Es ist ein Fehler beim Ausführen des Commands aufgetreten!', ephemeral: true };
+
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
+            await interaction.followUp(errorMessage);
         } else {
-            await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+            await interaction.reply(errorMessage);
         }
     }
 });
+
+// Bot starten
+client.login(token);
